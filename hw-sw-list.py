@@ -178,43 +178,51 @@ class NetworkInventory:
             ssh = paramiko.SSHClient()
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             
-            def create_transport():
-                transport = paramiko.Transport((ip, 22))
-                transport.disabled_algorithms = {
-                    'pubkeys': ['rsa-sha2-256', 'rsa-sha2-512']
-                }
-                return transport
+            def handler(title, instructions, prompt_list):
+                """Handle keyboard-interactive authentication"""
+                self.logger.debug(f"Keyboard-interactive auth - Title: {title}, Instructions: {instructions}")
+                answers = []
+                for prompt in prompt_list:
+                    self.logger.debug(f"Prompt: {prompt[0]}")
+                    if 'password' in prompt[0].lower():
+                        answers.append(self.password)
+                    else:
+                        answers.append(self.username)
+                return answers
             
             self.logger.debug(f"Connecting to {ip}")
             try:
-                # First attempt with minimal, explicit configuration
+                # Connect with keyboard-interactive authentication
                 connect_params = {
                     'hostname': ip,
                     'username': self.username,
-                    'password': self.password,
                     'timeout': 10,
                     'allow_agent': False,
                     'look_for_keys': False,
-                    'disabled_algorithms': {
-                        'pubkeys': ['rsa-sha2-256', 'rsa-sha2-512']
-                    }
+                    'auth_timeout': 20,
+                    'auth_method': 'keyboard-interactive'
                 }
                 
-                ssh.connect(**connect_params)
+                transport = paramiko.Transport((ip, 22))
+                transport.connect()
+                transport.auth_interactive(self.username, handler)
+                ssh._transport = transport
                 
             except Exception as e:
                 if "digital envelope routines" in str(e) or "EVP_DigestInit_ex" in str(e):
-                    # If FIPS-related error occurs, retry with custom transport
                     self.logger.debug("FIPS-related error detected, retrying with modified transport configuration")
                     ssh = paramiko.SSHClient()
                     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                     
-                    # Use custom transport without gss_kex
-                    transport = create_transport()
-                    transport.connect(
-                        username=self.username,
-                        password=self.password
-                    )
+                    # Create transport with disabled algorithms
+                    transport = paramiko.Transport((ip, 22))
+                    transport.disabled_algorithms = {
+                        'pubkeys': ['rsa-sha2-256', 'rsa-sha2-512']
+                    }
+                    
+                    # Start transport and attempt keyboard-interactive auth
+                    transport.connect()
+                    transport.auth_interactive(self.username, handler)
                     ssh._transport = transport
                 else:
                     raise
