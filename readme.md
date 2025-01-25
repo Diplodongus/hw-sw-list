@@ -1,4 +1,3 @@
-```markdown
 # Network Device Inventory Tool
 
 ## Description
