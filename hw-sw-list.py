@@ -10,7 +10,6 @@ from datetime import datetime
 from getpass import getpass
 import subprocess
 import paramiko
-from paramiko import Transport
 import re
 from typing import List, Dict, Tuple, Optional
 
@@ -35,7 +34,7 @@ class NetworkInventory:
         
         # Set up logging
         self.setup_logging(debug, quiet)
-        
+
     def setup_logging(self, debug: bool, quiet: bool) -> None:
         """Configure logging with detailed formatting for debugging."""
         self.logger = logging.getLogger('NetworkInventory')
@@ -175,21 +174,20 @@ class NetworkInventory:
         device_info = {}
         
         try:
-            # Initialize SSH connection with FIPS compatibility
+            # Initialize SSH connection
             ssh = paramiko.SSHClient()
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             
-            # Configure transport options for FIPS compatibility
-            transport_config = {
-                'disabled_algorithms': {
+            def create_transport():
+                transport = paramiko.Transport((ip, 22))
+                transport.disabled_algorithms = {
                     'pubkeys': ['rsa-sha2-256', 'rsa-sha2-512']
                 }
-            }
+                return transport
             
-            self.logger.debug(f"Attempting to connect to {ip} with username {self.username}")
+            self.logger.debug(f"Connecting to {ip}")
             try:
                 # First attempt with default configuration
-                self.logger.debug("Trying default SSH connection...")
                 ssh.connect(
                     ip,
                     username=self.username,
@@ -198,10 +196,9 @@ class NetworkInventory:
                     allow_agent=False,
                     look_for_keys=False
                 )
-                self.logger.debug("Default SSH connection successful")
             except Exception as e:
-                self.logger.debug(f"Initial connection attempt failed: {str(e)}")
                 if "digital envelope routines" in str(e) or "EVP_DigestInit_ex" in str(e):
+                    # If FIPS-related error occurs, retry with modified transport
                     self.logger.debug("FIPS-related error detected, retrying with modified transport configuration")
                     ssh = paramiko.SSHClient()
                     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -212,18 +209,16 @@ class NetworkInventory:
                         timeout=10,
                         allow_agent=False,
                         look_for_keys=False,
-                        transport_factory=lambda: paramiko.Transport((ip, 22), disabled_algorithms=transport_config['disabled_algorithms'])
+                        transport_factory=create_transport
                     )
                 else:
-                    self.logger.debug(f"Connection failed with non-FIPS error: {str(e)}")
                     raise
             
-            self.logger.debug("Creating interactive shell...")
+            # Create interactive shell with generous size
             shell = ssh.invoke_shell(width=200, height=1000)
             shell.settimeout(30)
             
             # Wait for initial prompt
-            self.logger.debug("Waiting for initial prompt...")
             initial_output = self.read_until_pattern(shell, r'\S+[#>]\s*$')
             self.logger.debug(f"Initial prompt received:\n{initial_output}")
             
@@ -235,35 +230,29 @@ class NetworkInventory:
             ]
             
             for command in commands:
-                self.logger.debug(f"Executing command: {command}")
                 output = self.execute_command(shell, command)
-                self.logger.debug(f"Command output length: {len(output)} characters")
                 
                 if command == "show version":
                     # Extract hostname
                     hostname_match = re.search(r"(\S+)#", output)
                     if hostname_match:
                         device_info['hostname'] = hostname_match.group(1)
-                        self.logger.debug(f"Found hostname: {device_info['hostname']}")
                     
                     # Extract software version
                     version_match = re.search(r"Cisco IOS Software.*Version ([^,]+)", output)
                     if version_match:
                         device_info['system_description'] = version_match.group(0)
-                        self.logger.debug(f"Found system description: {device_info['system_description']}")
                     
                     # Extract serial number
                     serial_match = re.search(r"System serial number\s*:\s*(\S+)", output)
                     if serial_match:
                         device_info['serial_number'] = serial_match.group(1)
-                        self.logger.debug(f"Found serial number: {device_info['serial_number']}")
                 
                 elif command == "show inventory":
                     # Extract chassis type
                     chassis_match = re.search(r"PID: (\S+)", output)
                     if chassis_match:
                         device_info['chassis_vendor_type'] = chassis_match.group(1)
-                        self.logger.debug(f"Found chassis type: {device_info['chassis_vendor_type']}")
                 
                 elif command == "dir flash:":
                     # Look for different possible flash size patterns
@@ -280,7 +269,6 @@ class NetworkInventory:
                                 flash_bytes = int(flash_match.group(1))
                                 flash_mb = flash_bytes / (1024 * 1024)
                                 device_info['flash_size_mb'] = f"{flash_mb:.2f}"
-                                self.logger.debug(f"Found flash size: {device_info['flash_size_mb']} MB")
                                 break
                             except (ValueError, IndexError) as e:
                                 self.logger.debug(f"Error processing flash size: {e}")
@@ -289,11 +277,11 @@ class NetworkInventory:
             device_info['ip_address'] = ip
             return device_info
                 
-        except paramiko.AuthenticationException as e:
-            self.logger.error(f"Authentication failed for {ip}: {str(e)}")
+        except paramiko.AuthenticationException:
+            self.logger.error(f"Authentication failed for {ip}")
             return None
         except paramiko.SSHException as e:
-            self.logger.error(f"SSH error for {ip}: {str(e)}")
+            self.logger.error(f"SSH error for {ip}: {e}")
             return None
         except Exception as e:
             self.logger.error(f"Unexpected error for {ip}: {str(e)}")
@@ -303,35 +291,13 @@ class NetworkInventory:
             if shell:
                 try:
                     shell.close()
-                except Exception as e:
-                    self.logger.debug(f"Error closing shell: {str(e)}")
+                except:
+                    pass
             if ssh:
                 try:
                     ssh.close()
-                except Exception as e:
-                    self.logger.debug(f"Error closing SSH connection: {str(e)}")
-                    
-                except paramiko.AuthenticationException:
-                    self.logger.error(f"Authentication failed for {ip}")
-                    return None
-                except paramiko.SSHException as e:
-                    self.logger.error(f"SSH error for {ip}: {e}")
-                    return None
-                except Exception as e:
-                    self.logger.error(f"Unexpected error for {ip}: {str(e)}")
-                    self.logger.debug("Exception details:", exc_info=True)
-                    return None
-                finally:
-                    if shell:
-                        try:
-                            shell.close()
-                        except:
-                            pass
-                    if ssh:
-                        try:
-                            ssh.close()
-                        except:
-                            pass
+                except:
+                    pass
 
     def export_to_csv(self, devices: List[Dict]) -> str:
         """Export device information to CSV file with timestamp."""
