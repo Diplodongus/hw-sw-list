@@ -195,9 +195,7 @@ class NetworkInventory:
                     password=self.password,
                     timeout=10,
                     allow_agent=False,
-                    look_for_keys=False,
-                    gss_auth=False,
-                    gss_kex=False
+                    look_for_keys=False
                 )
             except Exception as e:
                 if "digital envelope routines" in str(e) or "EVP_DigestInit_ex" in str(e):
