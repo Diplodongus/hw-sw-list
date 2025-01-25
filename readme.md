@@ -27,7 +27,7 @@ A Python script for network administrators to automate Cisco device discovery an
 - Python 3.6+
 - Required packages:
           - `paramiko` for SSH
-          - Standard library modules
+          -  `argparse`, and other standard library modules. argparse is not included in our production environment, so I included it in requirements.txt.
 
 ### Setup
 
