@@ -3,39 +3,47 @@
 
 ## Description
 
-A Python script designed to perform a comprehensive network inventory by ping sweeping a specified subnet and gathering detailed device information via SSH.
+A Python script for network administrators to automate Cisco device discovery and inventory collection. It performs subnet scanning and securely retrieves detailed hardware/software information via SSH.
 
-## Features
+## Core Functionality
 
-- **Ping Sweep:** Identifies reachable and unreachable hosts within a given subnet.
-- **SSH Data Collection:** Gathers device information such as hostname, software version, serial number, chassis type, and flash size.
-- **CSV Export:** Exports the collected data to a timestamped CSV file for easy analysis.
-- **Logging:** Supports debug and quiet modes for flexible logging preferences.
+- **Network Discovery:** Performs ping sweep of IPv4 subnets or single IPs
+- **Secure Access:** Uses SSH with keyboard-interactive authentication
+- **Data Collection:** Executes Cisco IOS commands to gather:
+     - Device hostname and IP
+     - IOS version details
+     - Serial numbers
+     - Hardware model information
+     - Available flash memory
+- **Output Management:**
+     - CSV export with timestamps
+     - Configurable logging levels
+     - Progress tracking
+     - Error handling
 
 ## Installation
 
 ### Prerequisites
 
-- Python 3.6 or higher
-- Required Python packages:
-    - `paramiko`
-    - `argparse`
-    - Additional standard libraries as used in the script.
+- Python 3.6+
+- Required packages:
+          - `paramiko` for SSH
+          - Standard library modules
 
 ### Setup
 
-1. **Clone the Repository**
+1. **Clone Repository**
 
-     ```bash
-     git clone https://github.com/yourusername/network-inventory-tool.git
-     cd network-inventory-tool
-     ```
+           ```bash
+           git clone https://github.com/yourusername/network-inventory-tool.git
+           cd network-inventory-tool
+           ```
 
 2. **Install Dependencies**
 
-     ```bash
-     pip install -r requirements.txt
-     ```
+           ```bash
+           pip install -r requirements.txt
+           ```
 
 ## Usage
 
@@ -45,13 +53,13 @@ python hw-sw-list.py <subnet> [options]
 
 ### Arguments
 
-- `<subnet>`: Network subnet in CIDR notation (e.g., `10.0.0.0/24`)
+- `<subnet>`: Target network (e.g., `10.0.0.0/24` or single IP)
 
 ### Options
 
-- `-u`, `--username`: Specify the TNA username.
-- `-d`, `--debug`: Enable debug logging for detailed output.
-- `-q`, `--quiet`: Activate quiet mode to suppress console output and log only to CSV.
+- `-u`, `--username`: TNA authentication username
+- `-d`, `--debug`: Enable detailed logging
+- `-q`, `--quiet`: CSV-only output mode
 
 ### Example
 
@@ -59,22 +67,29 @@ python hw-sw-list.py <subnet> [options]
 python hw-sw-list.py 192.168.1.0/24 -u admin -d
 ```
 
-## Output
+## Output Format
 
-The script generates a CSV file named `network_inventory_<timestamp>.csv` containing the following fields:
+Generates `network_inventory_<timestamp>.csv` with:
 
-- `hostname`
-- `ip_address`
-- `system_description`
-- `serial_number`
-- `chassis_vendor_type`
-- `flash_size_mb`
+- Device hostname
+- IP address
+- IOS version
+- Serial number
+- Hardware model
+- Flash memory size
+
+## Error Handling
+
+- Graceful handling of unreachable hosts
+- Authentication failure recovery
+- Timeout management
+- FIPS compliance support
 
 ## Contributing
 
-Contributions are welcome! Please open an issue or submit a pull request for any enhancements or bug fixes.
+Submit issues or pull requests for improvements.
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+[MIT License](LICENSE)
 ```
