@@ -277,11 +277,33 @@ class NetworkInventory:
                                 device_info['serial_number'] = serial_match.group(1)
                 
                 elif command == "show inventory":
-                    # Extract chassis information
+                    # Extract and process chassis information from show inventory
                     chassis_entries = list(re.finditer(r"NAME: \"([^\"]+)\".*?\nPID: (\S+)", output, re.DOTALL))
-                    chassis_types = [entry.group(2) for entry in chassis_entries 
-                                if "chassis" in entry.group(1).lower() or "switch" in entry.group(1).lower()]
+                    chassis_types = []
 
+                    # First, find a valid base chassis model to use as our pattern
+                    base_model = None
+                    for entry in chassis_entries:
+                        pid = entry.group(2)
+                        # Look for standard Cisco switch model patterns (WS-C, C9, etc.)
+                        if re.match(r'(WS-C|C\d{1})', pid):
+                            base_model = pid.split('-')[0]  # Extract the base model prefix
+                            chassis_types.append(pid)
+                            self.logger.debug(f"Found base model: {base_model} from PID: {pid}")
+                            break
+
+                    # If we found a valid base model, use it to find other matching chassis
+                    if base_model:
+                        matching_chassis = [
+                            entry.group(2) for entry in chassis_entries[1:]
+                            if entry.group(2).startswith(base_model)
+                        ]
+                        chassis_types.extend(matching_chassis)
+                        self.logger.debug(f"Found {len(chassis_types)} total chassis: {chassis_types}")
+                    else:
+                        self.logger.warning(f"No valid chassis model pattern found in inventory")
+
+                    # Now assign the chassis types to the appropriate devices
                     if 'stack_members' in device_info:
                         # For stacked devices, match chassis types with stack members
                         for i, chassis in enumerate(chassis_types):
