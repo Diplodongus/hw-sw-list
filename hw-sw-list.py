@@ -182,6 +182,7 @@ class NetworkInventory:
                 transport = paramiko.Transport((ip, 22))
                 transport.disabled_algorithms = {
                     'pubkeys': ['rsa-sha2-256', 'rsa-sha2-512']
+                    
                 }
                 return transport
             
@@ -194,7 +195,9 @@ class NetworkInventory:
                     password=self.password,
                     timeout=10,
                     allow_agent=False,
-                    look_for_keys=False
+                    look_for_keys=False,
+                    gss_auth=False,
+                    gss_kex=False
                 )
             except Exception as e:
                 if "digital envelope routines" in str(e) or "EVP_DigestInit_ex" in str(e):
