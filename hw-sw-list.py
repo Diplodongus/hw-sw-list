@@ -256,16 +256,41 @@ class NetworkInventory:
                     if version_match:
                         device_info['system_description'] = version_match.group(0)
                     
-                    # Extract serial number
-                    serial_match = re.search(r"System serial number\s*:\s*(\S+)", output)
-                    if serial_match:
-                        device_info['serial_number'] = serial_match.group(1)
+                    # Detect if this is a stack by looking for multiple Motherboard Serial Numbers
+                    mb_serials = list(re.finditer(r"Motherboard Serial Number\s*:\s*(\S+)", output))
+
+                    if len(mb_serials) > 1:
+                        # This is a stack - create entries for each member
+                        device_info['stack_members'] = []
+                        for serial in mb_serials:
+                            device_info['stack_members'].append({
+                                'serial_number': serial.group(1),
+                                'chassis_vendor_type': None  # Will be populated from show inventory
+                            })
+                    else:
+                        # Single device - try motherboard serial first, then system serial
+                        if mb_serials:
+                            device_info['serial_number'] = mb_serials[0].group(1)
+                        else:
+                            serial_match = re.search(r"System serial number\s*:\s*(\S+)", output)
+                            if serial_match:
+                                device_info['serial_number'] = serial_match.group(1)
                 
                 elif command == "show inventory":
-                    # Extract chassis type
-                    chassis_match = re.search(r"PID: (\S+)", output)
-                    if chassis_match:
-                        device_info['chassis_vendor_type'] = chassis_match.group(1)
+                    # Extract chassis information
+                    chassis_entries = list(re.finditer(r"NAME: \"([^\"]+)\".*?\nPID: (\S+)", output, re.DOTALL))
+                    chassis_types = [entry.group(2) for entry in chassis_entries 
+                                if "chassis" in entry.group(1).lower() or "switch" in entry.group(1).lower()]
+
+                    if 'stack_members' in device_info:
+                        # For stacked devices, match chassis types with stack members
+                        for i, chassis in enumerate(chassis_types):
+                            if i < len(device_info['stack_members']):
+                                device_info['stack_members'][i]['chassis_vendor_type'] = chassis
+                    else:
+                        # For single device, use the first chassis type found
+                        if chassis_types:
+                            device_info['chassis_vendor_type'] = chassis_types[0]
                 
                 elif command == "dir flash:":
                     # Look for different possible flash size patterns
@@ -331,7 +356,22 @@ class NetworkInventory:
                 writer = csv.DictWriter(csvfile, fieldnames=fields)
                 writer.writeheader()
                 for device in devices:
-                    writer.writerow(device)
+                    if 'stack_members' in device:
+                        # Handle stacked devices - create a row for each member
+                        base_info = {
+                            'hostname': device.get('hostname', ''),
+                            'ip_address': device.get('ip_address', ''),
+                            'system_description': device.get('system_description', ''),
+                            'flash_size_mb': device.get('flash_size_mb', '')
+                        }
+                        for member in device['stack_members']:
+                            row = base_info.copy()
+                            row['serial_number'] = member.get('serial_number', '')
+                            row['chassis_vendor_type'] = member.get('chassis_vendor_type', '')
+                            writer.writerow(row)
+                    else:
+                        # Handle single device - write one row
+                        writer.writerow(device)
             
             self.logger.info(f"Inventory exported to {filename}")
             return filename
