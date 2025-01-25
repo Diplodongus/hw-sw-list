@@ -17,7 +17,8 @@ class NetworkInventory:
     def __init__(self, username: str, password: str, subnet: str, debug: bool = False, quiet: bool = False):
         """Initialize NetworkInventory with credentials and configuration."""
         self.username = username
-        self.password = password
+        # Ensure password is converted to string if it's not already
+        self.password = str(password) if password is not None else ""
         self.subnet = ipaddress.ip_network(subnet)
         
         # Set up logging
@@ -51,7 +52,7 @@ class NetworkInventory:
                     cmd = ['ping', '-n', '1', '-w', '1000', ip_str]
                 else:
                     # Linux/Unix ping with more verbose output
-                    cmd = ['ping', '-c', '1', '-W', '1', ip_str]
+                    cmd = ['/usr/bin/ping', '-c', '1', '-W', '1', ip_str]
                 
                 self.logger.debug(f"Running command: {' '.join(cmd)}")
                 result = subprocess.run(
