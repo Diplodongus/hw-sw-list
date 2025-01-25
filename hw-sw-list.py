@@ -182,36 +182,40 @@ class NetworkInventory:
                 transport = paramiko.Transport((ip, 22))
                 transport.disabled_algorithms = {
                     'pubkeys': ['rsa-sha2-256', 'rsa-sha2-512']
-                    
                 }
                 return transport
             
             self.logger.debug(f"Connecting to {ip}")
             try:
-                # First attempt with default configuration
-                ssh.connect(
-                    ip,
-                    username=self.username,
-                    password=self.password,
-                    timeout=10,
-                    allow_agent=False,
-                    look_for_keys=False
-                )
+                # First attempt with minimal, explicit configuration
+                connect_params = {
+                    'hostname': ip,
+                    'username': self.username,
+                    'password': self.password,
+                    'timeout': 10,
+                    'allow_agent': False,
+                    'look_for_keys': False,
+                    'disabled_algorithms': {
+                        'pubkeys': ['rsa-sha2-256', 'rsa-sha2-512']
+                    }
+                }
+                
+                ssh.connect(**connect_params)
+                
             except Exception as e:
                 if "digital envelope routines" in str(e) or "EVP_DigestInit_ex" in str(e):
-                    # If FIPS-related error occurs, retry with modified transport
+                    # If FIPS-related error occurs, retry with custom transport
                     self.logger.debug("FIPS-related error detected, retrying with modified transport configuration")
                     ssh = paramiko.SSHClient()
                     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                    ssh.connect(
-                        ip,
+                    
+                    # Use custom transport without gss_kex
+                    transport = create_transport()
+                    transport.connect(
                         username=self.username,
-                        password=self.password,
-                        timeout=10,
-                        allow_agent=False,
-                        look_for_keys=False,
-                        transport_factory=create_transport
+                        password=self.password
                     )
+                    ssh._transport = transport
                 else:
                     raise
             
