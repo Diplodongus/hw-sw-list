@@ -42,6 +42,12 @@ class NetworkInventory:
         
         self.logger.info(f"Starting ping sweep of subnet {self.subnet}")
         
+        # Determine which subprocess.run parameters to use based on Python version
+        if sys.version_info >= (3, 7):
+            subprocess_text_param = {'text': True}
+        else:
+            subprocess_text_param = {'universal_newlines': True}
+        
         for ip in self.subnet.hosts():
             ip_str = str(ip)
             self.logger.debug(f"Pinging {ip_str}")
@@ -52,14 +58,14 @@ class NetworkInventory:
                     cmd = ['ping', '-n', '1', '-w', '1000', ip_str]
                 else:
                     # Linux/Unix ping with more verbose output
-                    cmd = ['/usr/bin/ping', '-c', '1', '-W', '1', ip_str]
+                    cmd = ['ping', '-c', '1', '-W', '1', ip_str]
                 
                 self.logger.debug(f"Running command: {' '.join(cmd)}")
                 result = subprocess.run(
                     cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    text=True
+                    **subprocess_text_param  # Use version-appropriate parameter
                 )
                 
                 # Log complete output regardless of result
