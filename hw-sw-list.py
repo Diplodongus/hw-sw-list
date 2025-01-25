@@ -50,8 +50,10 @@ class NetworkInventory:
                 if sys.platform.startswith('win'):
                     cmd = ['ping', '-n', '1', '-w', '1000', ip_str]
                 else:
-                    cmd = ['ping', '-c', '1', '-W', '1', '-q', ip_str]
+                    # Linux/Unix ping with more verbose output
+                    cmd = ['ping', '-c', '1', '-W', '1', ip_str]
                 
+                self.logger.debug(f"Running command: {' '.join(cmd)}")
                 result = subprocess.run(
                     cmd,
                     stdout=subprocess.PIPE,
@@ -59,22 +61,32 @@ class NetworkInventory:
                     text=True
                 )
                 
-                self.logger.debug(f"Ping output for {ip_str}:")
-                self.logger.debug(f"stdout: {result.stdout}")
-                self.logger.debug(f"stderr: {result.stderr}")
+                # Log complete output regardless of result
+                self.logger.debug(f"Ping return code: {result.returncode}")
+                if result.stdout:
+                    self.logger.debug(f"Ping stdout:\n{result.stdout}")
+                if result.stderr:
+                    self.logger.debug(f"Ping stderr:\n{result.stderr}")
                 
                 if result.returncode == 0:
                     self.logger.debug(f"{ip_str} is reachable")
                     reachable.append(ip_str)
                 else:
-                    self.logger.debug(f"{ip_str} is unreachable")
+                    self.logger.debug(f"{ip_str} is unreachable (Return code: {result.returncode})")
                     unreachable.append(ip_str)
                     
             except subprocess.SubprocessError as e:
-                self.logger.error(f"Error pinging {ip_str}: {e}")
+                self.logger.error(f"Error executing ping for {ip_str}: {str(e)}")
+                self.logger.debug("Exception details:", exc_info=True)
+                unreachable.append(ip_str)
+            except Exception as e:
+                self.logger.error(f"Unexpected error pinging {ip_str}: {str(e)}")
+                self.logger.debug("Exception details:", exc_info=True)
                 unreachable.append(ip_str)
                 
         self.logger.info(f"Ping sweep complete. Found {len(reachable)} reachable hosts")
+        if reachable:
+            self.logger.debug(f"Reachable hosts: {reachable}")
         return reachable, unreachable
 
     def read_until_pattern(self, shell, pattern: str, timeout: int = 30) -> str:
