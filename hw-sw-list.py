@@ -17,9 +17,20 @@ class NetworkInventory:
     def __init__(self, username: str, password: str, subnet: str, debug: bool = False, quiet: bool = False):
         """Initialize NetworkInventory with credentials and configuration."""
         self.username = username
-        # Ensure password is converted to string if it's not already
         self.password = str(password) if password is not None else ""
-        self.subnet = ipaddress.ip_network(subnet)
+        
+        # Handle both single IP and subnet inputs
+        try:
+            # First try to create an IP network
+            self.subnet = ipaddress.ip_network(subnet, strict=False)
+        except ValueError:
+            try:
+                # If that fails, try to create a single IP network
+                single_ip = ipaddress.ip_address(subnet)
+                # Create a /32 network for single IP
+                self.subnet = ipaddress.ip_network(f"{single_ip}/32", strict=False)
+            except ValueError as e:
+                raise ValueError(f"Invalid IP address or subnet format: {subnet}") from e
         
         # Set up logging
         self.setup_logging(debug, quiet)
@@ -48,7 +59,10 @@ class NetworkInventory:
         else:
             subprocess_text_param = {'universal_newlines': True}
         
-        for ip in self.subnet.hosts():
+        # For single IP (subnet with /32), we only need to check one address
+        hosts = [self.subnet.network_address] if self.subnet.prefixlen == 32 else self.subnet.hosts()
+        
+        for ip in hosts:
             ip_str = str(ip)
             self.logger.debug(f"Pinging {ip_str}")
             
@@ -65,7 +79,7 @@ class NetworkInventory:
                     cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    **subprocess_text_param  # Use version-appropriate parameter
+                    **subprocess_text_param
                 )
                 
                 # Log complete output regardless of result
