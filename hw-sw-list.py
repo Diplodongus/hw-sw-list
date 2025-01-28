@@ -256,21 +256,21 @@ class NetworkInventory:
                     if version_match:
                         device_info['system_description'] = version_match.group(0)
                     
-                    # Detect if this is a stack by looking for multiple Motherboard Serial Numbers
-                    mb_serials = list(re.finditer(r"Motherboard Serial Number\s*:\s*(\S+)", output))
+                    # Detect if this is a stack by looking for multiple System Serial Numbers
+                    sys_serials = list(re.finditer(r"System Serial Number\s*:\s*(\S+)", output))
 
-                    if len(mb_serials) > 1:
+                    if len(sys_serials) > 1:
                         # This is a stack - create entries for each member
                         device_info['stack_members'] = []
-                        for serial in mb_serials:
+                        for serial in sys_serials:
                             device_info['stack_members'].append({
                                 'serial_number': serial.group(1),
                                 'chassis_vendor_type': None  # Will be populated from show inventory
                             })
                     else:
-                        # Single device - try motherboard serial first, then system serial
-                        if mb_serials:
-                            device_info['serial_number'] = mb_serials[0].group(1)
+                        # Single device - try system serial number first, then other serials
+                        if sys_serials:
+                            device_info['serial_number'] = sys_serials[0].group(1)
                         else:
                             serial_match = re.search(r"System serial number\s*:\s*(\S+)", output)
                             if serial_match:
