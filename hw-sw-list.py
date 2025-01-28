@@ -364,18 +364,18 @@ class NetworkInventory:
         timestamp = datetime.now().strftime("%Y-%m-%d, %H:%M:%S %Z")
         filename = f"network_inventory_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         
-        # Define categories and their corresponding fields
-        categories = [
-            "Cisco Interfaces and Modules",
-            "Routers",
-            "Switches and Hubs",
-            "Storage Networking",
-            "Voice and Telephony",
-            "Wireless Controllers",
-            "Access Points",
-            "Security and VPN",
-            "Optical Transport"
-        ]
+        # Define categories and their model patterns
+        categories = {
+            "Cisco Interfaces and Modules": [r"^NIM-", r"^SM-", r"^EHWIC-"],
+            "Routers": [r"^ISR\d+", r"^ASR\d+", r"^C\d+00", r"^CISCO\d+", r"^ISR\d+"],
+            "Switches and Hubs": [r"^WS-C", r"^C[2-9]\d{3}", r"^CBS\d+"],
+            "Storage Networking": [r"^MDS", r"^DS-"],
+            "Voice and Telephony": [r"^VG\d+", r"^ISR\d+.*-V", r"^UC\d+"],
+            "Wireless Controllers": [r"^AIR-CT\d+", r"^C\d+WLC"],
+            "Access Points": [r"^AIR-CAP", r"^AIR-LAP"],
+            "Security and VPN": [r"^ASA", r"^FPR", r"^ISA\d+"],
+            "Optical Transport": [r"^ONS", r"^NCS\d+"]
+        }
 
         fields = [
             'Hostname',
@@ -385,6 +385,31 @@ class NetworkInventory:
             'Chassis Vendor Type',
             'Total Flash Device Size (MB)'
         ]
+        
+        def categorize_device(model: str) -> str:
+            """Determine device category based on model number."""
+            if not model:
+                return "Switches and Hubs"  # Default category
+            
+            for category, patterns in categories.items():
+                for pattern in patterns:
+                    if re.search(pattern, model, re.IGNORECASE):
+                        return category
+            return "Switches and Hubs"  # Default if no match
+        
+        # Sort devices into categories
+        categorized_devices = {cat: [] for cat in categories.keys()}
+        
+        for device in devices:
+            if 'stack_members' in device:
+                # Categorize based on first stack member's chassis type
+                if device['stack_members'] and device['stack_members'][0].get('chassis_vendor_type'):
+                    category = categorize_device(device['stack_members'][0]['chassis_vendor_type'])
+                else:
+                    category = "Switches and Hubs"
+            else:
+                category = categorize_device(device.get('chassis_vendor_type', ''))
+            categorized_devices[category].append(device)
         
         try:
             with open(filename, 'w', newline='') as csvfile:
@@ -397,15 +422,14 @@ class NetworkInventory:
                 writer.writerow([])
 
                 # Process each category
-                for category in categories:
+                for category in categories.keys():
                     writer.writerow([f'Category: {category}'])
+                    devices_in_category = categorized_devices[category]
                     
-                    # For now, assume all devices are switches. Want to add logic to categorize devices
-                    if category == "Switches and Hubs" and devices:
+                    if devices_in_category:
                         writer.writerow(fields)
-                        writer.writerow([])  # Empty row after header
                         
-                        for device in devices:
+                        for device in devices_in_category:
                             if 'stack_members' in device:
                                 # Handle stacked devices
                                 base_info = [
