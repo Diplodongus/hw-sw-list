@@ -358,8 +358,8 @@ class NetworkInventory:
         # Define categories and their model patterns
         categories = {
             "Cisco Interfaces and Modules": [r"^NIM-", r"^SM-", r"^EHWIC-"],
-            "Routers": [r"^ISR\d+", r"^ASR\d+", r"^C\d+00", r"^CISCO\d+", r"^ISR\d+"],
-            "Switches and Hubs": [r"^WS-C", r"^C[2-9]\d{3}", r"^CBS\d+"],
+            "Routers": [r"^ISR\d+", r"^ASR\d+", r"^C83\d+", r"^CISCO\d+"],
+            "Switches and Hubs": [r"^WS-C", r"^C[2-7]\d{3}", r"^C9\d{3}", r"^CBS\d+"],
             "Storage Networking": [r"^MDS", r"^DS-"],
             "Voice and Telephony": [r"^VG\d+", r"^ISR\d+.*-V", r"^UC\d+"],
             "Wireless Controllers": [r"^AIR-CT\d+", r"^C\d+WLC"],
