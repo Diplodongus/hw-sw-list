@@ -361,42 +361,84 @@ class NetworkInventory:
 
     def export_to_csv(self, devices: List[Dict]) -> str:
         """Export device information to CSV file with timestamp."""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"network_inventory_{timestamp}.csv"
+        timestamp = datetime.now().strftime("%Y-%m-%d, %H:%M:%S %Z")
+        filename = f"network_inventory_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         
+        # Define categories and their corresponding fields
+        categories = [
+            "Cisco Interfaces and Modules",
+            "Routers",
+            "Switches and Hubs",
+            "Storage Networking",
+            "Voice and Telephony",
+            "Wireless Controllers",
+            "Access Points",
+            "Security and VPN",
+            "Optical Transport"
+        ]
+
         fields = [
-            'hostname',
-            'ip_address',
-            'system_description',
-            'serial_number',
-            'chassis_vendor_type',
-            'flash_size_mb'
+            'Hostname',
+            'IP Address',
+            'System Description',
+            'Serial Number',
+            'Chassis Vendor Type',
+            'Total Flash Device Size (MB)'
         ]
         
         try:
             with open(filename, 'w', newline='') as csvfile:
-                writer = csv.DictWriter(csvfile, fieldnames=fields)
-                writer.writeheader()
-                for device in devices:
-                    if 'stack_members' in device:
-                        # Handle stacked devices - create a row for each member
-                        base_info = {
-                            'hostname': device.get('hostname', ''),
-                            'ip_address': device.get('ip_address', ''),
-                            'system_description': device.get('system_description', ''),
-                            'flash_size_mb': device.get('flash_size_mb', '')
-                        }
-                        for member in device['stack_members']:
-                            row = base_info.copy()
-                            row['serial_number'] = member.get('serial_number', '')
-                            row['chassis_vendor_type'] = member.get('chassis_vendor_type', '')
-                            writer.writerow(row)
+                writer = csv.writer(csvfile)
+                
+                # Write report header
+                writer.writerow(['Report Title: Device inventory'])
+                writer.writerow([f'Generated: {timestamp}'])
+                writer.writerow([])
+                writer.writerow([])
+
+                # Process each category
+                for category in categories:
+                    writer.writerow([f'Category: {category}'])
+                    
+                    # For now, assume all devices are switches. Want to add logic to categorize devices
+                    if category == "Switches and Hubs" and devices:
+                        writer.writerow(fields)
+                        writer.writerow([])  # Empty row after header
+                        
+                        for device in devices:
+                            if 'stack_members' in device:
+                                # Handle stacked devices
+                                base_info = [
+                                    device.get('hostname', ''),
+                                    device.get('ip_address', ''),
+                                    device.get('system_description', ''),
+                                    '',  # Serial number will come from stack member
+                                    '',  # Chassis type will come from stack member
+                                    device.get('flash_size_mb', '')
+                                ]
+                                for member in device['stack_members']:
+                                    row = base_info.copy()
+                                    row[3] = member.get('serial_number', '')
+                                    row[4] = member.get('chassis_vendor_type', '')
+                                    writer.writerow(row)
+                            else:
+                                # Handle single device
+                                writer.writerow([
+                                    device.get('hostname', ''),
+                                    device.get('ip_address', ''),
+                                    device.get('system_description', ''),
+                                    device.get('serial_number', ''),
+                                    device.get('chassis_vendor_type', ''),
+                                    device.get('flash_size_mb', '')
+                                ])
                     else:
-                        # Handle single device - write one row
-                        writer.writerow(device)
+                        writer.writerow(['None.'])
+                    
+                    writer.writerow([' '])  # Space between categories
             
             self.logger.info(f"Inventory exported to {filename}")
             return filename
+            
         except Exception as e:
             self.logger.error(f"Error exporting to CSV: {e}")
             return ""
