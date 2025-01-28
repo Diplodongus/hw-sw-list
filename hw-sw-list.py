@@ -12,6 +12,7 @@ import subprocess
 import paramiko
 import re
 from typing import List, Dict, Tuple, Optional
+from functools import partial
 
 class NetworkInventory:
     def __init__(self, username: str, password: str, subnet: str, debug: bool = False, quiet: bool = False):
@@ -47,64 +48,54 @@ class NetworkInventory:
             self.logger.addHandler(console_handler)
 
     def ping_sweep(self) -> Tuple[List[str], List[str]]:
-        """Perform ping sweep of the subnet."""
-        reachable = []
-        unreachable = []
+        """Perform ping sweep of the subnet using concurrent execution."""
+        import concurrent.futures
         
         self.logger.info(f"Starting ping sweep of subnet {self.subnet}")
         
-        # Determine which subprocess.run parameters to use based on Python version
-        if sys.version_info >= (3, 7):
-            subprocess_text_param = {'text': True}
-        else:
-            subprocess_text_param = {'universal_newlines': True}
-        
-        # For single IP (subnet with /32), we only need to check one address
-        hosts = [self.subnet.network_address] if self.subnet.prefixlen == 32 else self.subnet.hosts()
-        
-        for ip in hosts:
-            ip_str = str(ip)
+        def ping_single_host(ip_str: str) -> Tuple[str, bool]:
+            """Ping a single host and return tuple of (ip, is_reachable)."""
             self.logger.debug(f"Pinging {ip_str}")
             
             try:
-                # Determine OS-specific ping command
-                if sys.platform.startswith('win'):
-                    cmd = ['ping', '-n', '1', '-w', '1000', ip_str]
-                else:
-                    # Linux/Unix ping with more verbose output
-                    cmd = ['ping', '-c', '1', '-W', '1', ip_str]
+                # OS-specific ping command
+                cmd = ['ping', '-n', '1', '-w', '1000', ip_str] if sys.platform.startswith('win') \
+                    else ['ping', '-c', '1', '-W', '1', ip_str]
                 
                 self.logger.debug(f"Running command: {' '.join(cmd)}")
                 result = subprocess.run(
                     cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    **subprocess_text_param
+                    text=True if sys.version_info >= (3, 7) else True,
+                    timeout=2  # Enforce timeout
                 )
                 
-                # Log complete output regardless of result
-                self.logger.debug(f"Ping return code: {result.returncode}")
-                if result.stdout:
-                    self.logger.debug(f"Ping stdout:\n{result.stdout}")
-                if result.stderr:
-                    self.logger.debug(f"Ping stderr:\n{result.stderr}")
+                is_reachable = result.returncode == 0
+                self.logger.debug(f"{ip_str} is {'reachable' if is_reachable else 'unreachable'}")
+                return (ip_str, is_reachable)
                 
-                if result.returncode == 0:
-                    self.logger.debug(f"{ip_str} is reachable")
+            except (subprocess.SubprocessError, Exception) as e:
+                self.logger.debug(f"Error pinging {ip_str}: {str(e)}")
+                return (ip_str, False)
+
+        # Generate list of IPs to check
+        hosts = [str(self.subnet.network_address)] if self.subnet.prefixlen == 32 \
+            else [str(ip) for ip in self.subnet.hosts()]
+        
+        reachable = []
+        unreachable = []
+        
+        # Use ThreadPoolExecutor for concurrent execution
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            results = executor.map(ping_single_host, hosts)
+            
+            for ip_str, is_reachable in results:
+                if is_reachable:
                     reachable.append(ip_str)
                 else:
-                    self.logger.debug(f"{ip_str} is unreachable (Return code: {result.returncode})")
                     unreachable.append(ip_str)
-                    
-            except subprocess.SubprocessError as e:
-                self.logger.error(f"Error executing ping for {ip_str}: {str(e)}")
-                self.logger.debug("Exception details:", exc_info=True)
-                unreachable.append(ip_str)
-            except Exception as e:
-                self.logger.error(f"Unexpected error pinging {ip_str}: {str(e)}")
-                self.logger.debug("Exception details:", exc_info=True)
-                unreachable.append(ip_str)
-                
+
         self.logger.info(f"Ping sweep complete. Found {len(reachable)} reachable hosts")
         if reachable:
             self.logger.debug(f"Reachable hosts: {reachable}")
