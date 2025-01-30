@@ -11,6 +11,7 @@ from getpass import getpass
 import subprocess
 import paramiko
 import re
+import concurrent.futures
 from typing import List, Dict, Tuple, Optional
 from functools import partial
 
@@ -49,7 +50,6 @@ class NetworkInventory:
 
     def ping_sweep(self) -> Tuple[List[str], List[str]]:
         """Perform ping sweep of the subnet using concurrent execution."""
-        import concurrent.futures
         
         self.logger.info(f"Starting ping sweep of subnet {self.subnet}")
         
@@ -155,200 +155,157 @@ class NetworkInventory:
         
         return output
 
-    def get_device_info(self, ip: str) -> Optional[Dict]:
-        """
-        SSH into device and gather required information.
-        Uses a single SSH session for all commands.
-        """
-        ssh = None
-        shell = None
-        device_info = {}
+    def _connect_ssh(self, ip: str) -> Tuple[Optional[paramiko.SSHClient], Optional[paramiko.Channel]]:
+        """Establish SSH connection and return client and shell"""
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        
+        def handler(title, instructions, prompt_list):
+            """Handle keyboard-interactive authentication"""
+            self.logger.debug(f"Keyboard-interactive auth - Title: {title}, Instructions: {instructions}")
+            answers = []
+            for prompt in prompt_list:
+                self.logger.debug(f"Prompt: {prompt[0]}")
+                if 'password' in prompt[0].lower():
+                    answers.append(self.password)
+                else:
+                    answers.append(self.username)
+            return answers
         
         try:
-            # Initialize SSH connection
-            ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            
-            def handler(title, instructions, prompt_list):
-                """Handle keyboard-interactive authentication"""
-                self.logger.debug(f"Keyboard-interactive auth - Title: {title}, Instructions: {instructions}")
-                answers = []
-                for prompt in prompt_list:
-                    self.logger.debug(f"Prompt: {prompt[0]}")
-                    if 'password' in prompt[0].lower():
-                        answers.append(self.password)
-                    else:
-                        answers.append(self.username)
-                return answers
-            
             self.logger.debug(f"Connecting to {ip}")
             try:
-                # Connect with keyboard-interactive authentication
-                connect_params = {
-                    'hostname': ip,
-                    'username': self.username,
-                    'timeout': 10,
-                    'allow_agent': False,
-                    'look_for_keys': False,
-                    'auth_timeout': 20,
-                    'auth_method': 'keyboard-interactive'
-                }
-                
                 transport = paramiko.Transport((ip, 22))
                 transport.connect()
                 transport.auth_interactive(self.username, handler)
                 ssh._transport = transport
-                
             except Exception as e:
                 if "digital envelope routines" in str(e) or "EVP_DigestInit_ex" in str(e):
                     self.logger.debug("FIPS-related error detected, retrying with modified transport configuration")
                     ssh = paramiko.SSHClient()
                     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                    
-                    # Create transport with disabled algorithms
                     transport = paramiko.Transport((ip, 22))
-                    transport.disabled_algorithms = {
-                        'pubkeys': ['rsa-sha2-256', 'rsa-sha2-512']
-                    }
-                    
-                    # Start transport and attempt keyboard-interactive auth
+                    transport.disabled_algorithms = {'pubkeys': ['rsa-sha2-256', 'rsa-sha2-512']}
                     transport.connect()
                     transport.auth_interactive(self.username, handler)
                     ssh._transport = transport
                 else:
                     raise
             
-            # Create interactive shell with generous size
             shell = ssh.invoke_shell(width=200, height=1000)
             shell.settimeout(30)
-            
-            # Wait for initial prompt
             initial_output = self.read_until_pattern(shell, r'\S+[#>]\s*$')
             self.logger.debug(f"Initial prompt received:\n{initial_output}")
-            
-            # Execute commands and gather information
-            commands = [
-                "show version",
-                "show inventory",
-                "dir flash:"
-            ]
-            
+            return ssh, shell
+        except Exception as e:
+            self.logger.error(f"Connection error for {ip}: {str(e)}")
+            if ssh:
+                ssh.close()
+            return None, None
+
+    def _process_version_output(self, output: str) -> Dict:
+        """Process show version command output"""
+        info = {}
+        hostname_match = re.search(r"(\S+)#", output)
+        if hostname_match:
+            info['hostname'] = hostname_match.group(1)
+        
+        version_match = re.search(r"Cisco IOS Software.*Version ([^,]+)", output)
+        if version_match:
+            info['system_description'] = version_match.group(0)
+        
+        sys_serials = list(re.finditer(r"System Serial Number\s*:\s*(\S+)", output))
+        if len(sys_serials) > 1:
+            info['stack_members'] = []
+            for serial in sys_serials:
+                info['stack_members'].append({
+                    'serial_number': serial.group(1),
+                    'chassis_vendor_type': None
+                })
+        else:
+            if sys_serials:
+                info['serial_number'] = sys_serials[0].group(1)
+            else:
+                serial_match = re.search(r"System serial number\s*:\s*(\S+)", output)
+                if serial_match:
+                    info['serial_number'] = serial_match.group(1)
+        return info
+
+    def _process_inventory_output(self, output: str, device_info: Dict) -> Dict:
+        """Process show inventory command output"""
+        chassis_entries = list(re.finditer(r"NAME: \"([^\"]+)\".*?\nPID: (\S+)", output, re.DOTALL))
+        chassis_types = []
+
+        base_model = None
+        for entry in chassis_entries:
+            pid = entry.group(2)
+            if re.match(r'(WS-C|C\d{1})', pid):
+                base_model = pid.split('-')[0]
+                chassis_types.append(pid)
+                self.logger.debug(f"Found base model: {base_model} from PID: {pid}")
+                break
+
+        if base_model:
+            matching_chassis = [entry.group(2) for entry in chassis_entries[1:]
+                              if entry.group(2).startswith(base_model)]
+            chassis_types.extend(matching_chassis)
+            self.logger.debug(f"Found {len(chassis_types)} total chassis: {chassis_types}")
+        else:
+            self.logger.warning(f"No valid chassis model pattern found in inventory")
+
+        if 'stack_members' in device_info:
+            for i, chassis in enumerate(chassis_types):
+                if i < len(device_info['stack_members']):
+                    device_info['stack_members'][i]['chassis_vendor_type'] = chassis
+        else:
+            if chassis_types:
+                device_info['chassis_vendor_type'] = chassis_types[0]
+        return device_info
+
+    def get_device_info(self, ip: str) -> Optional[Dict]:
+        """Gather device information using multiple commands"""
+        ssh = None
+        shell = None
+        device_info = {}
+        
+        try:
+            ssh, shell = self._connect_ssh(ip)
+            if not ssh or not shell:
+                return None
+
+            commands = ["show version", "show inventory", "dir flash:"]
             for command in commands:
                 output = self.execute_command(shell, command)
                 
                 if command == "show version":
-                    # Extract hostname
-                    hostname_match = re.search(r"(\S+)#", output)
-                    if hostname_match:
-                        device_info['hostname'] = hostname_match.group(1)
-                    
-                    # Extract software version
-                    version_match = re.search(r"Cisco IOS Software.*Version ([^,]+)", output)
-                    if version_match:
-                        device_info['system_description'] = version_match.group(0)
-                    
-                    # Detect if this is a stack by looking for multiple System Serial Numbers
-                    sys_serials = list(re.finditer(r"System Serial Number\s*:\s*(\S+)", output))
-
-                    if len(sys_serials) > 1:
-                        # This is a stack - create entries for each member
-                        device_info['stack_members'] = []
-                        for serial in sys_serials:
-                            device_info['stack_members'].append({
-                                'serial_number': serial.group(1),
-                                'chassis_vendor_type': None  # Will be populated from show inventory
-                            })
-                    else:
-                        # Single device - try system serial number first, then other serials
-                        if sys_serials:
-                            device_info['serial_number'] = sys_serials[0].group(1)
-                        else:
-                            serial_match = re.search(r"System serial number\s*:\s*(\S+)", output)
-                            if serial_match:
-                                device_info['serial_number'] = serial_match.group(1)
-                
+                    device_info.update(self._process_version_output(output))
                 elif command == "show inventory":
-                    # Extract and process chassis information from show inventory
-                    chassis_entries = list(re.finditer(r"NAME: \"([^\"]+)\".*?\nPID: (\S+)", output, re.DOTALL))
-                    chassis_types = []
-
-                    # First, find a valid base chassis model to use as our pattern
-                    base_model = None
-                    for entry in chassis_entries:
-                        pid = entry.group(2)
-                        # Look for standard Cisco switch model patterns (WS-C, C9, etc.)
-                        if re.match(r'(WS-C|C\d{1})', pid):
-                            base_model = pid.split('-')[0]  # Extract the base model prefix
-                            chassis_types.append(pid)
-                            self.logger.debug(f"Found base model: {base_model} from PID: {pid}")
-                            break
-
-                    # If we found a valid base model, use it to find other matching chassis
-                    if base_model:
-                        matching_chassis = [
-                            entry.group(2) for entry in chassis_entries[1:]
-                            if entry.group(2).startswith(base_model)
-                        ]
-                        chassis_types.extend(matching_chassis)
-                        self.logger.debug(f"Found {len(chassis_types)} total chassis: {chassis_types}")
-                    else:
-                        self.logger.warning(f"No valid chassis model pattern found in inventory")
-
-                    # Now assign the chassis types to the appropriate devices
-                    if 'stack_members' in device_info:
-                        # For stacked devices, match chassis types with stack members
-                        for i, chassis in enumerate(chassis_types):
-                            if i < len(device_info['stack_members']):
-                                device_info['stack_members'][i]['chassis_vendor_type'] = chassis
-                    else:
-                        # For single device, use the first chassis type found
-                        if chassis_types:
-                            device_info['chassis_vendor_type'] = chassis_types[0]
-                
+                    device_info = self._process_inventory_output(output, device_info)
                 elif command == "dir flash:":
-                    # Look for different possible flash size patterns
-                    flash_patterns = [
-                        r"(\d+) bytes total",
-                        r"(\d+) bytes used",
-                        r"(\d+) bytes free"
-                    ]
-                    
-                    for pattern in flash_patterns:
+                    for pattern in [r"(\d+) bytes total", r"(\d+) bytes used", r"(\d+) bytes free"]:
                         flash_match = re.search(pattern, output)
                         if flash_match:
                             try:
                                 flash_bytes = int(flash_match.group(1))
-                                flash_mb = flash_bytes / (1024 * 1024)
-                                device_info['flash_size_mb'] = f"{flash_mb:.2f}"
+                                device_info['flash_size_mb'] = f"{flash_bytes / (1024 * 1024):.2f}"
                                 break
                             except (ValueError, IndexError) as e:
                                 self.logger.debug(f"Error processing flash size: {e}")
                                 continue
-            
+
             device_info['ip_address'] = ip
             return device_info
-                
-        except paramiko.AuthenticationException:
-            self.logger.error(f"Authentication failed for {ip}")
-            return None
-        except paramiko.SSHException as e:
-            self.logger.error(f"SSH error for {ip}: {e}")
-            return None
+
         except Exception as e:
-            self.logger.error(f"Unexpected error for {ip}: {str(e)}")
-            self.logger.debug("Exception details:", exc_info=True)
+            self.logger.error(f"Error gathering info from {ip}: {str(e)}")
             return None
         finally:
             if shell:
-                try:
-                    shell.close()
-                except:
-                    pass
+                try: shell.close()
+                except: pass
             if ssh:
-                try:
-                    ssh.close()
-                except:
-                    pass
+                try: ssh.close()
+                except: pass
 
     def export_to_csv(self, devices: List[Dict]) -> str:
         """Export device information to CSV file with timestamp."""
@@ -480,15 +437,23 @@ def main():
         
         # Gather device information
         devices = []
-        for ip in reachable:
-            device_info = inventory.get_device_info(ip)
-            if device_info:
-                devices.append(device_info)
-            else:
-                response = input(f"Failed to gather information from {ip}. Continue? (y/n): ")
-                if response.lower() != 'y':
+            # Use ThreadPoolExecutor for concurrent device info gathering
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_ip = {executor.submit(inventory.get_device_info, ip): ip for ip in reachable}
+            for future in concurrent.futures.as_completed(future_to_ip):
+                ip = future_to_ip[future]
+                try:
+                    device_info = future.result()
+                    if device_info:
+                        devices.append(device_info)
+                    else:
+                        response = input(f"Failed to gather information from {ip}. Continue? (y/n): ")
+                        if response.lower() != 'y':
+                            break
+                except Exception as e:
+                    inventory.logger.error(f"Error gathering info from {ip}: {str(e)}")
                     break
-        
+
         # Export results
         if devices:
             inventory.export_to_csv(devices)
