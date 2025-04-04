@@ -26,9 +26,9 @@ $flashSizeMapping = @{
     "WS-C3650-24PD-E" = 1621
     
     # Partial/series matches - used as fallbacks, and marked with "*" for clarity
-    "C9300"           = "11353*"  # Match any C9300 series
-    "3850"            = "1680*"   # Match any 3850 series
-    "3650"            = "1621*"   # Match any 3650 series
+    #"C9300"           = "11353*"  # Match any C9300 series
+    #"3850"            = "1680*"   # Match any 3850 series
+    #"3650"            = "1621*"   # Match any 3650 series
 }
 
 # Get input file - support both drag-drop and manual execution
