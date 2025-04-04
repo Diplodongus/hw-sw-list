@@ -22,8 +22,11 @@
 $flashSizeMapping = @{
     # Exact model matches - use these first
     "C9300-24T"       = 11353
+    "C9300-24U"       = 11353
     "WS-C3850-24XS-E" = 1680
     "WS-C3650-24PD-E" = 1621
+    "WS-C3850-12S-E" = 1562
+    "Cisco Firepower 2110" = 1000
     
     # Partial/series matches - used as fallbacks, and marked with "*" for clarity
     #"C9300"           = "11353*"  # Match any C9300 series
@@ -129,7 +132,7 @@ for ($i = 0; $i -lt $lines.Count; $i++) {
         $headerLineIndex = $i
         
         # Split the header line to find the Part No. column index
-        $headerFields = Parse-CsvLine -line $lines[$i]
+        $headerFields = ConvertFrom-CsvLine -line $lines[$i]
         for ($j = 0; $j -lt $headerFields.Count; $j++) {
             if ($headerFields[$j].Trim() -eq "Part No.") {
                 $partNoColumnIndex = $j
@@ -154,7 +157,7 @@ for ($i = 0; $i -lt $headerLineIndex; $i++) {
 }
 
 # Add the new column to the header
-$headerFields = Parse-CsvLine -line $lines[$headerLineIndex]
+$headerFields = ConvertFrom-CsvLine -line $lines[$headerLineIndex]
 $headerFields += "Flash Size (MB)"
 $outputLines += $headerFields -join ","
 
@@ -168,7 +171,7 @@ for ($i = $headerLineIndex + 1; $i -lt $lines.Count; $i++) {
     }
     
     $devicesProcessed++
-    $fields = Parse-CsvLine -line $lines[$i]
+    $fields = ConvertFrom-CsvLine -line $lines[$i]
     
     # Ensure we have enough fields
     if ($fields.Count -le $partNoColumnIndex) {
