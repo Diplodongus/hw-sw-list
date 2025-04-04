@@ -24,15 +24,25 @@ $flashSizeMapping = @{
     # Exact model matches - use these first
     "C9300-24T"       = 11353
     "C9300-24U"       = 11353
-    "WS-C3850-24XS-E" = 1680
+    "C9300-48F-E" = 11353
+    "C9300-48U"       = 11353
+    "C9300-48UXM"    = 11353
     "WS-C3650-24PD-E" = 1621
+    "WS3650-48FD-E" =  1562 
+    "WS-C3850-24XS-E" = 1680
+    "WS-C3850-24S-E"  = 1680
     "WS-C3850-12S-E"  = 1562
+    "WS-C3850-12X48U-S" = 1680
+    "WS-C3850-12X48U-E" = 1680
+    "N3K-C3172PQ-10GBE" = 1821
+    "C8300-1N1S-6T" = 7693
     "Cisco Firepower 2110" = 10000
-    
+    "CISCO3925-CHASSIS" = 514
+    "ISR4451-X/K9" = 15155
     # Partial/series matches - used as fallbacks, and marked with "*" for clarity
-    #"C9300"           = 11353  # Match any C9300 series
-    #"3850"            = 1680   # Match any 3850 series
-    #"3650"            = 1621   # Match any 3650 series
+    "C9300"           = 11353  # Match any C9300 series
+    "3850"            = 1680   # Match any 3850 series
+    "3650"            = 1621   # Match any 3650 series
 }
 
 # Function to get flash size for a part number
