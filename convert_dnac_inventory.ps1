@@ -7,6 +7,7 @@
     column based on the 'Part No.' field, and outputs a new CSV file.
     
     Supports drag-and-drop: Just drag a CSV file onto this .ps1 file.
+    Handles multiple part numbers in a single cell, matching flash sizes for each part.
 
 .NOTES
     To enable drag-and-drop functionality:
@@ -25,13 +26,37 @@ $flashSizeMapping = @{
     "C9300-24U"       = 11353
     "WS-C3850-24XS-E" = 1680
     "WS-C3650-24PD-E" = 1621
-    "WS-C3850-12S-E" = 1562
+    "WS-C3850-12S-E"  = 1562
     "Cisco Firepower 2110" = 10000
     
     # Partial/series matches - used as fallbacks, and marked with "*" for clarity
-    #"C9300"           = "11353*"  # Match any C9300 series
-    #"3850"            = "1680*"   # Match any 3850 series
-    #"3650"            = "1621*"   # Match any 3650 series
+    #"C9300"           = 11353  # Match any C9300 series
+    #"3850"            = 1680   # Match any 3850 series
+    #"3650"            = 1621   # Match any 3650 series
+}
+
+# Function to get flash size for a part number
+function Get-FlashSize {
+    param (
+        [string]$partNo
+    )
+    
+    $partNo = $partNo.Trim()
+    
+    # Try exact match first
+    if ($flashSizeMapping.ContainsKey($partNo)) {
+        return $flashSizeMapping[$partNo]
+    }
+    
+    # Then try partial matches
+    foreach ($key in $flashSizeMapping.Keys) {
+        if ($partNo -match $key) {
+            return $flashSizeMapping[$key]
+        }
+    }
+    
+    # No match found
+    return ""
 }
 
 # Get input file - support both drag-drop and manual execution
@@ -164,6 +189,7 @@ $outputLines += $headerFields -join ","
 # Process each data row
 $devicesProcessed = 0
 $flashSizesAdded = 0
+$totalPartNumbers = 0
 
 for ($i = $headerLineIndex + 1; $i -lt $lines.Count; $i++) {
     if ([string]::IsNullOrWhiteSpace($lines[$i])) {
@@ -180,57 +206,72 @@ for ($i = $headerLineIndex + 1; $i -lt $lines.Count; $i++) {
         continue
     }
     
-    # Get the part number
-    $partNo = $fields[$partNoColumnIndex].Trim('"', ' ')
-    Write-Host "Checking part number: '$partNo'" -ForegroundColor Gray
+    # Get the part number field
+    $partNoField = $fields[$partNoColumnIndex].Trim('"', ' ')
+    Write-Host "Processing line with part number(s): '$partNoField'" -ForegroundColor Gray
     
-    # Determine flash size based on part number
-    $flashSize = ""
+    # Check if there are multiple part numbers (common delimiters: comma, semicolon, space, newline)
+    $partNumbers = @()
     
-    # Try exact match first
-    if ($flashSizeMapping.ContainsKey($partNo)) {
-        $flashSize = $flashSizeMapping[$partNo]
-        $flashSizesAdded++
-        Write-Host "  Exact match found: $partNo = $flashSize MB" -ForegroundColor Green
+    # First try to split by common delimiters
+    if ($partNoField -match ',|\||;|\n|\r|/') {
+        # Split using multiple possible delimiters
+        $partNumbers = $partNoField -split '[,\|;\r\n/]' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() }
     }
-    # Then try to match part of the model number
     else {
-        # Check each key in the mapping
-        foreach ($key in $flashSizeMapping.Keys | Where-Object { $_ -notmatch "^\d" }) { # Skip numeric-only keys
-            if ($partNo -match $key) {
-                $flashSize = $flashSizeMapping[$key]
-                $flashSizesAdded++
-                Write-Host "  Pattern match found: $partNo matches pattern $key = $flashSize MB" -ForegroundColor Green
-                break
-            }
+        # Also check for multiple part numbers separated by spaces (if they follow the known patterns)
+        $potentialParts = $partNoField -split '\s+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        
+        # Only consider space-delimited parts if they match known part number patterns
+        # or if there are exactly two entries (this is a simple heuristic)
+        $validParts = $potentialParts | Where-Object { 
+            $_ -match '^(C9300|C\d{4}|WS-C\d{4}|Cisco)' -or 
+            $_ -match '^\d{4}[A-Z]?' -or
+            $potentialParts.Count -eq 2
         }
         
-        # If still no match, try the most generic matches
-        if ([string]::IsNullOrEmpty($flashSize)) {
-            # Look for series numbers in the part number
-            if ($partNo -match "C?9300|93\d{2}") {
-                $flashSize = $flashSizeMapping["C9300"]
-                $flashSizesAdded++
-                Write-Host "  Series match found: $partNo matches C9300 series = $flashSize MB" -ForegroundColor Green
-            }
-            elseif ($partNo -match "3850|38\d{2}") {
-                $flashSize = $flashSizeMapping["3850"]
-                $flashSizesAdded++
-                Write-Host "  Series match found: $partNo matches 3850 series = $flashSize MB" -ForegroundColor Green
-            }
-            elseif ($partNo -match "3650|36\d{2}") {
-                $flashSize = $flashSizeMapping["3650"]
-                $flashSizesAdded++
-                Write-Host "  Series match found: $partNo matches 3650 series = $flashSize MB" -ForegroundColor Green
-            }
-            else {
-                Write-Host "  No match found for: $partNo" -ForegroundColor DarkYellow
-            }
+        if ($validParts.Count -gt 1) {
+            $partNumbers = $validParts
         }
+        else {
+            # Just one part number
+            $partNumbers = @($partNoField)
+        }
+    }
+    
+    $totalPartNumbers += $partNumbers.Count
+    
+    # Array to store flash sizes for all parts
+    $flashSizes = @()
+    $flashSizesFound = 0
+    
+    # Process each part number
+    foreach ($partNo in $partNumbers) {
+        Write-Host "  Checking part number: '$partNo'" -ForegroundColor Gray
+        
+        # Get flash size for this part number
+        $flashSize = Get-FlashSize -partNo $partNo
+        
+        if (-not [string]::IsNullOrEmpty($flashSize)) {
+            $flashSizes += $flashSize
+            $flashSizesFound++
+            Write-Host "    Found flash size: $flashSize MB" -ForegroundColor Green
+        }
+        else {
+            Write-Host "    No match found for: $partNo" -ForegroundColor DarkYellow
+        }
+    }
+    
+    # Format flash sizes in the same order as part numbers
+    $flashSizeOutput = if ($flashSizes.Count -gt 0) {
+        $flashSizesAdded++
+         '"' + ($flashSizes -join ", ") + '"'
+    } else {
+        ""
     }
     
     # Add the flash size to the row
-    $outputLines += $lines[$i] + "," + $flashSize
+    $outputLines += $lines[$i] + "," + $flashSizeOutput
 }
 
 # Write the output file
@@ -241,7 +282,8 @@ try {
     Write-Host ""
     Write-Host "Summary:" -ForegroundColor Cyan
     Write-Host "  Devices processed: $devicesProcessed" 
-    Write-Host "  Flash sizes added: $flashSizesAdded"
+    Write-Host "  Total part numbers found: $totalPartNumbers"
+    Write-Host "  Devices with flash sizes added: $flashSizesAdded"
 }
 catch {
     Write-Error "Failed to write output file: $_"
