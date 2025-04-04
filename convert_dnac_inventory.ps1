@@ -26,7 +26,7 @@ $flashSizeMapping = @{
     "WS-C3850-24XS-E" = 1680
     "WS-C3650-24PD-E" = 1621
     "WS-C3850-12S-E" = 1562
-    "Cisco Firepower 2110" = 1000
+    "Cisco Firepower 2110" = 10000
     
     # Partial/series matches - used as fallbacks, and marked with "*" for clarity
     #"C9300"           = "11353*"  # Match any C9300 series
